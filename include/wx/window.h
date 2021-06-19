@@ -139,6 +139,13 @@ enum
     wxSEND_EVENT_POST = 1
 };
 
+// Flags for WXSetInitialFittingClientSize().
+enum
+{
+    wxSIZE_SET_CURRENT = 0x0001, // Set the current size.
+    wxSIZE_SET_MIN     = 0x0002  // Set the size as the minimum allowed size.
+};
+
 // ----------------------------------------------------------------------------
 // (pseudo)template list classes
 // ----------------------------------------------------------------------------
@@ -655,7 +662,7 @@ public:
         // state, i.e. the state in which the window would be if all its
         // parents were enabled (use IsEnabled() above to get the effective
         // window state)
-    bool IsThisEnabled() const { return m_isEnabled; }
+    virtual bool IsThisEnabled() const { return m_isEnabled; }
 
     // returns true if the window is visible, i.e. IsShown() returns true
     // if called on it and all its parents up to the first TLW
@@ -1540,6 +1547,13 @@ public:
     // Note that the event may end up being sent to a different window, if this
     // window is part of a composite control.
     bool WXSendContextMenuEvent(const wxPoint& posInScreenCoords);
+
+    // This internal function needs to be called to set the fitting client size
+    // (i.e. the minimum size determined by the window sizer) when the size
+    // that we really need to use is not known until the window is actually
+    // shown, as is the case for TLWs with recent GTK versions, as it will
+    // update the size again when it does become known, if necessary.
+    virtual void WXSetInitialFittingClientSize(int flags);
 
         // get the handle of the window for the underlying window system: this
         // is only used for wxWin itself or for user code which wants to call

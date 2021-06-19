@@ -472,6 +472,7 @@ wxFont::wxFont(wxOSXSystemFont font)
             break;
         case wxOSX_SYSTEM_FONT_FIXED:
             uifont = kCTFontUIFontUserFixedPitch;
+            break;
         default:
             break;
     }
@@ -779,7 +780,8 @@ void wxNativeFontInfo::InitFromFont(CTFontRef font)
 {
     Init();
 
-    InitFromFontDescriptor(CTFontCopyFontDescriptor(font) );
+    wxCFRef<CTFontDescriptorRef> desc(CTFontCopyFontDescriptor(font));
+    InitFromFontDescriptor( desc );
 }
 
 void wxNativeFontInfo::InitFromFontDescriptor(CTFontDescriptorRef desc)
@@ -978,12 +980,14 @@ bool wxNativeFontInfo::FromString(const wxString& s)
         token = tokenizer.GetNextToken();
         if ( !token.ToCDouble(&d) )
             return false;
-        if ( d < 0 || d > FLT_MAX )
+        if ( d < 0 )
             return false;
 #ifdef __LP64__
         // CGFloat is just double in this case.
         m_ctSize = d;
 #else // !__LP64__
+        if ( d > FLT_MAX )
+            return false;
         m_ctSize = static_cast<CGFloat>(d);
 #endif // __LP64__/!__LP64__
 
@@ -1063,6 +1067,7 @@ bool wxNativeFontInfo::FromString(const wxString& s)
         if (descriptor != NULL)
         {
             InitFromFontDescriptor(descriptor);
+            CFRelease(descriptor);
             m_underlined = underlined;
             m_strikethrough = strikethrough;
             m_encoding = encoding;

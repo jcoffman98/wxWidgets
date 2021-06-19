@@ -11,9 +11,6 @@
 // For compilers that support precompilation, includes "wx.h".
 #include "wx/wxprec.h"
 
-#if defined(__BORLANDC__)
-    #pragma hdrstop
-#endif
 
 #if wxUSE_GRAPHICS_CONTEXT
 
@@ -26,12 +23,6 @@
     #include "wx/math.h"
     #include "wx/geometry.h"
 #endif
-
-//-----------------------------------------------------------------------------
-// constants
-//-----------------------------------------------------------------------------
-
-static const double RAD2DEG = 180.0 / M_PI;
 
 //-----------------------------------------------------------------------------
 // Local functions
@@ -406,7 +397,11 @@ void wxGCDCImpl::DestroyClippingRegion()
     // so we must explicitly make sure it only covers the area we want it to draw
     int width, height ;
     GetOwner()->GetSize( &width , &height ) ;
-    m_graphicContext->Clip( DeviceToLogicalX(0) , DeviceToLogicalY(0) , DeviceToLogicalXRel(width), DeviceToLogicalYRel(height) );
+    wxPoint origin;
+#ifdef __WXOSX__
+    origin = OSXGetOrigin();
+#endif
+    m_graphicContext->Clip( DeviceToLogicalX(origin.x) , DeviceToLogicalY(origin.y) , DeviceToLogicalXRel(width), DeviceToLogicalYRel(height) );
 
     m_graphicContext->SetPen( m_pen );
     m_graphicContext->SetBrush( m_brush );
@@ -686,11 +681,11 @@ void wxGCDCImpl::DoDrawArc( wxCoord x1, wxCoord y1,
     double dy = y1 - yc;
     double radius = sqrt((double)(dx * dx + dy * dy));
     wxCoord rad = (wxCoord)radius;
-    double sa, ea;
+    double sa, ea; // In radians
     if (x1 == x2 && y1 == y2)
     {
         sa = 0.0;
-        ea = 360.0;
+        ea = 2.0 * M_PI;
     }
     else if (radius == 0.0)
     {
@@ -699,11 +694,11 @@ void wxGCDCImpl::DoDrawArc( wxCoord x1, wxCoord y1,
     else
     {
         sa = (x1 - xc == 0) ?
-     (y1 - yc < 0) ? 90.0 : -90.0 :
-             -atan2(double(y1 - yc), double(x1 - xc)) * RAD2DEG;
+     (y1 - yc < 0) ? M_PI / 2.0 : -M_PI / 2.0 :
+             -atan2(double(y1 - yc), double(x1 - xc));
         ea = (x2 - xc == 0) ?
-     (y2 - yc < 0) ? 90.0 : -90.0 :
-             -atan2(double(y2 - yc), double(x2 - xc)) * RAD2DEG;
+     (y2 - yc < 0) ? M_PI / 2.0 : -M_PI / 2.0 :
+             -atan2(double(y2 - yc), double(x2 - xc));
     }
 
     bool fill = m_brush.GetStyle() != wxBRUSHSTYLE_TRANSPARENT;
@@ -713,7 +708,7 @@ void wxGCDCImpl::DoDrawArc( wxCoord x1, wxCoord y1,
         path.MoveToPoint( xc, yc );
     // since these angles (ea,sa) are measured counter-clockwise, we invert them to
     // get clockwise angles
-    path.AddArc( xc, yc , rad, wxDegToRad(-sa), wxDegToRad(-ea), false );
+    path.AddArc( xc, yc , rad, -sa, -ea, false );
     if ( fill && ((x1!=x2)||(y1!=y2)) )
         path.AddLineToPoint( xc, yc );
     m_graphicContext->DrawPath(path);
@@ -785,29 +780,11 @@ void wxGCDCImpl::DoDrawPoint( wxCoord x, wxCoord y )
     if (!m_logicalFunctionSupported)
         return;
 
-    wxPen pointPen(m_pen.GetColour());
-    wxDCPenChanger penChanger(*GetOwner(), pointPen);
+    wxDCBrushChanger brushChanger(*GetOwner(), wxBrush(m_pen.GetColour()));
+    wxDCPenChanger penChanger(*GetOwner(), *wxTRANSPARENT_PEN);
 
-#if defined(__WXMSW__) && wxUSE_GRAPHICS_GDIPLUS
-    // single point path does not work with GDI+
-    if (m_graphicContext->GetRenderer() == wxGraphicsRenderer::GetGDIPlusRenderer())
-    {
-        const double dx = 0.25 / m_scaleX;
-        const double dy = 0.25 / m_scaleY;
-        m_graphicContext->StrokeLine(x - dx, y - dy, x + dx, y + dy);
-    }
-    else
-#endif
-    {
-#ifdef __WXOSX__
-        m_graphicContext->StrokeLine(x, y, x, y);
-#else
-        wxGraphicsPath path(m_graphicContext->CreatePath());
-        path.MoveToPoint(x, y);
-        path.CloseSubpath();
-        m_graphicContext->StrokePath(path);
-#endif
-    }
+    // Raster-based DCs draw a single pixel regardless of scale
+    m_graphicContext->DrawRectangle(x, y, 1 / m_scaleX, 1 / m_scaleY);
 
     CalcBoundingBox(x, y);
 }
@@ -1216,6 +1193,11 @@ void wxGCDCImpl::DoDrawRotatedText(const wxString& text, wxCoord x, wxCoord y,
 
 void wxGCDCImpl::DoDrawText(const wxString& str, wxCoord x, wxCoord y)
 {
+    wxCHECK_RET( IsOk(), "wxGCDC::DoDrawText - invalid DC" );
+
+    if ( str.empty() )
+        return;
+
     // For compatibility with other ports (notably wxGTK) and because it's
     // genuinely useful, we allow passing multiline strings to DrawText().
     // However there is no native OSX function to draw them directly so we
@@ -1227,11 +1209,6 @@ void wxGCDCImpl::DoDrawText(const wxString& str, wxCoord x, wxCoord y)
         GetOwner()->DrawLabel(str, wxRect(x, y, 0, 0));
         return;
     }
-
-    wxCHECK_RET( IsOk(), wxT("wxGCDC(cg)::DoDrawText - invalid DC") );
-
-    if ( str.empty() )
-        return;
 
     // Text drawing shouldn't be affected by the raster operation
     // mode set by SetLogicalFunction() and should be always done
@@ -1374,6 +1351,9 @@ void wxGCDCImpl::DoGradientFillLinear(const wxRect& rect,
                                   const wxColour& destColour,
                                   wxDirection nDirection )
 {
+    if (rect.width == 0 || rect.height == 0)
+        return;
+
     wxPoint start;
     wxPoint end;
     switch( nDirection)
@@ -1401,9 +1381,6 @@ void wxGCDCImpl::DoGradientFillLinear(const wxRect& rect,
     default :
         break;
     }
-
-    if (rect.width == 0 || rect.height == 0)
-        return;
 
     m_graphicContext->SetBrush( m_graphicContext->CreateLinearGradientBrush(
         start.x,start.y,end.x,end.y, initialColour, destColour));
